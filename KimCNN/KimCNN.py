@@ -84,3 +84,8 @@ class KimCNN:
 		return model
 
 #keras.utils.plot_model requires graphviz
+
+# Variar parámetros para ver distintos comportamientos
+# Guardar valores en algún archivo
+## Todo lo que se pueda guardar
+# Desarrollar conjunto de pruebas propio

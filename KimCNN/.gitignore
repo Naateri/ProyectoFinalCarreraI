@@ -4,6 +4,12 @@
 
 models/
 
+# ========================== #
+# No need to upload datasets #
+# ========================== #
+
+datasets/
+
 # ====================== #
 # Python generated files #
 # ====================== #

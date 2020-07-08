@@ -1,6 +1,7 @@
 from __future__ import print_function
 import numpy as np
 import time
+import os
 
 import tensorflow as tf
 from tensorflow import keras
@@ -11,11 +12,37 @@ from tensorflow.keras.optimizers import RMSprop
 class HameedBiLSTM:
 
 	model = None
+	embeddings_index = {}
 
-	def __init__(self, maxlen, max_features):
+	def load_glove(self):
+		print('Building Glove data')
+		GLOVE_DIR = 'datasets/glove/'
+		f = open(os.path.join(GLOVE_DIR, 'glove.6B.300d.txt'))
+		for line in f:
+			values = line.split()
+			word = values[0]
+			coefs = np.asarray(values[1:], dtype='float32')
+			self.embeddings_index[word] = coefs
+		f.close()
+
+		print('Glove: Found %s word vectors.' % len(self.embeddings_index))
+
+	def __init__(self, maxlen, max_features, /, use_glove=False, word_index=None):
 		inputs = keras.Input(shape=(maxlen,), name="InputLayer")
-		embedding = Embedding(max_features, 300, input_length=maxlen, 
-			name="EmbeddingLayer") (inputs)
+		if use_glove:
+			self.load_glove()
+			embedding_matrix = np.zeros((len(word_index)+1, 300))
+			for word, i in word_index.items():
+				embedding_vector = self.embeddings_index.get(word)
+				if embedding_vector is not None:
+					# if not found: embedding_matrix will be all zeros
+					embedding_matrix[i] = embedding_vector
+			
+			embedding = Embedding(len(word_index) + 1, 300, input_length=maxlen,
+				weights=[embedding_matrix], trainable=True) (inputs)
+		else:
+			embedding = Embedding(max_features, 300, input_length=maxlen, trainable=True,
+				name="EmbeddingLayer") (inputs)
 		bilstm_layer = Bidirectional(LSTM(16, dropout=0.3, 
 			return_sequences=True), name="BiLSTMLayer") (embedding)
 

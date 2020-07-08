@@ -1,7 +1,6 @@
 ## TODO:
 ## -word2vec
 ## -KFold for MR dataset
-## -SST2 dataset
 
 from KimCNN import KimCNN
 import numpy as np
@@ -9,9 +8,11 @@ from tensorflow.keras.datasets import imdb
 from tensorflow.keras.preprocessing import sequence
 from sklearn.model_selection import train_test_split
 import os
+
+
 # Pass sentence to integers
 def transform(sentence, pad_len, words, /, ret_array=True, UNK=2,
-		max_features=20000):
+		max_features=40000):
 	vector = list()
 	sentence = sentence.split()
 	for word in sentence:
@@ -145,13 +146,92 @@ def load_imdb(words, index):
 		f.close()
 	
 	return (train_x, train_y), (test_x, test_y)
+
+def load_sst2(words, index):
+	textfile = 'datasets/SST2/unsup.csv'
+	trainfile = 'datasets/SST2/train.csv'
+	testfile = 'datasets/SST2/test.csv'
+
+	train_x = list()
+	train_y = list()
+	test_x = list()
+	test_y = list()
+
+	#words, index = get_wordvec_imdb()
+	'''
+	f = open(textfile, 'r')
+	
+	while True:
+		line = f.readline()
+
+		if not line:
+			break
+			
+		cur_data = line.split(',')
+
+		if cur_data[0] == 'label':
+			continue
+
+		text = cur_data[1].strip('\"\n')
+		#print(text)
+		array = transform(text, 400, words, UNK=index, ret_array=False)
+		train_x.append(array)
+		
+		train_y.append(float(cur_data[0]))
+	'''
+
+	## Train
+
+	f = open(trainfile, 'r')
+	
+	while True:
+		line = f.readline()
+
+		if not line:
+			break
+			
+		cur_data = line.split(',')
+
+		if cur_data[0] == 'label':
+			continue
+
+		text = cur_data[1].strip('\"\n')
+		#print(text)
+		array = transform(text, 400, words, UNK=index, ret_array=False)
+		train_x.append(array)
+		
+		train_y.append(float(cur_data[0]))
+	
+	f.close()
+
+	## Test
+	f = open(testfile, 'r')
+	
+	while True:
+		line = f.readline()
+
+		if not line:
+			break
+			
+		cur_data = line.split(',')
+
+		if cur_data[0] == 'label':
+			continue
+
+		text = cur_data[1].strip('\"\n')
+		#print(text)
+		array = transform(text, 400, words, UNK=index, ret_array=False)
+		test_x.append(array)
+		
+		test_y.append(float(cur_data[0]))
+
+	return (train_x, train_y), (test_x, test_y)
 	
 
 train = True # True if training neural network, False if testing
 
 maxlen = 400
-max_features = 20000
-network = KimCNN(400, max_features)
+max_features = 40000
 
 imdb_words = imdb.get_word_index()
 imdb_words = {k:(v+3) for k,v in imdb_words.items()}
@@ -172,11 +252,12 @@ get_sentence = lambda vector : ' '.join(id_to_word[num] for num in vector)
 #load_imdb()
 #exit()
 
-DATASET = 1
+DATASET = 3
 
 # 0 -> keras imdb
 # 1 -> IMDB
 # 2 -> MR 
+# 3 -> SST2
 
 if train:
 	print('Training model')
@@ -186,13 +267,16 @@ if train:
 		(x_train, y_train), (x_test, y_test) = data
 	elif DATASET == 1:
 		#data = load_imdb(words, imdb_index)
-		data = load_imdb(words, 2)
+		data = load_imdb(imdb_words, 2)
 		(x_train, y_train), (x_test, y_test) = data
 	elif DATASET == 2:
 		print("len(i_words)", len(imdb_words))
 		data = load_MR(imdb_words, 2)
 		X, y = data
-		x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.1)
+		x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+	elif DATASET == 3:
+		data = load_sst2(imdb_words, 2)
+		(x_train, y_train), (x_test, y_test) = data
 
 	# x_train, x_test = list of indexes (words)
 	# y_train, y_test = list of 0 (neg) or 1 (pos)
@@ -215,15 +299,23 @@ if train:
 	print("x shape: ", x_train[0].shape)
 	print("x_train[0]", x_train[0])
 	print("x_train[1]", x_train[1])
-	example = transform("That guy sucks really bad buddy", maxlen, words)
+	example = transform("That guy sucks really bad buddy", maxlen, imdb_words)
 	print("example shape", example.shape)
 	#print("example in array shape", np.array([example]).shape)
 
 	batch_size = 50
 	if DATASET == 0 or DATASET == 1:
-		epochs = 45
+		network = KimCNN(400, max_features)
+		#epochs = 45
+		epochs = 1
 	elif DATASET == 2:
-		epochs = 60
+		network = KimCNN(400, max_features)
+		batch_size = 20
+		#epochs = 60
+		epochs = 1
+	elif DATASET == 3:
+		network = KimCNN(400, max_features)
+		epochs = 10
 
 	print("Ready to train")
 	#exit()
@@ -236,6 +328,9 @@ if train:
 	elif DATASET == 2:
 		network.train(x_train, x_test, y_train, y_test, batch_size=batch_size, epochs=epochs,
 			save_model=True, save_file='models/kimcnn_model_MR')
+	elif DATASET == 3:
+		network.train(x_train, x_test, y_train, y_test, batch_size=batch_size, epochs=epochs,
+			save_model=True, save_file='models/kimcnn_model_SST2')
 
 	model = network.model
 
@@ -245,7 +340,7 @@ if train:
 	print(predictions)
 
 	print("Value to predict:", "He is an amazing driver loved it")
-	example = transform("He is an amazing driver loved it", maxlen, words)
+	example = transform("He is an amazing driver loved it", maxlen, imdb_words)
 	predictions = model.predict(np.array(example))
 	print(predictions)
 

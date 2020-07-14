@@ -10,7 +10,7 @@ from sklearn.metrics import confusion_matrix
 
 ### Global Variables ###
 
-DATASET = 3
+DATASET = 1
 # 0 -> keras IMDB
 # 1 -> MR
 # 2 -> SST2
@@ -346,11 +346,15 @@ if train:
 	elif DATASET == 1: # MR
 		X, y, mr_wordindex = load_MR()
 		print('Total data: ', len(X))
-		x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.1)
+		X_train, x_val, Y_train, y_val = train_test_split(X, y, test_size=0.1)
+
+		#x_val = sequence.pad_sequences(x_val, maxlen=maxlen)
+
+		x_train, x_test, y_train, y_test = train_test_split(X_train, Y_train, test_size=0.1)
 
 		max_features = len(mr_wordindex)+1
 
-		network = HameedBiLSTM(40, max_features, use_glove=True, word_index=mr_wordindex)
+		network = HameedBiLSTM(40, max_features, use_glove=False, word_index=mr_wordindex)
 	
 	elif DATASET == 2: # SST2
 		(x_train, y_train), (x_test, y_test), sst2_wordindex = load_SST2()
@@ -366,11 +370,13 @@ if train:
 		# val will be used to test the models accuracy
 		# based on the split made by the dataset
 
+		x_val = sequence.pad_sequences(x_val, maxlen=maxlen)
+
 		x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.1)
 
 		max_features = len(imdb_wordindex) + 1
 
-		network = HameedBiLSTM(400, max_features, use_glove=True, word_index=imdb_wordindex)
+		network = HameedBiLSTM(400, max_features, use_glove=False, word_index=imdb_wordindex)
 	
 	print(len(x_train), 'train sequences')
 	print(len(x_test), 'test sequences')
@@ -403,15 +409,15 @@ if train:
 	elif DATASET == 1: # MR
 		epochs = 70
 		network.train(x_train, x_test, y_train, y_test, batch_size=64, epochs=epochs,
-			save_model=True, save_file='models/bilstm_model_MR_glove_test10T')
+			save_model=True, save_file='models/bilstm_model_MR_NOglove_test10V2')
 	elif DATASET == 2: # SST2
 		epochs = 70
 		network.train(x_train, x_test, y_train, y_test, batch_size=64, epochs=epochs,
 			save_model=True, save_file='models/bilstm_model_SST2_glove')
 	elif DATASET == 3: # IMDB
 		epochs = 45
-		network.train(x_train, x_test, y_train, y_test, batch_size=64, epochs=3,
-			save_model=False, save_file='models/bilstm_model_IMDB_glove')
+		network.train(x_train, x_test, y_train, y_test, batch_size=64, epochs=epochs,
+			save_model=True, save_file='models/bilstm_model_IMDB_NOglove')
 
 	model = network.model
 
@@ -437,8 +443,10 @@ if train:
 	if DATASET == 0:
 		pass
 	elif DATASET == 1:
-		y_pred = model.predict(x_test)
-		score, acc = model.evaluate(x_test, y_test, batch_size=64, verbose=0)
+		x_val = np.array(x_val)
+		y_val = np.array(y_val)
+		y_pred = model.predict(x_val)
+		score, acc = model.evaluate(x_val, y_val, batch_size=64, verbose=0)
 
 		temp = list()
 		for value in y_pred:
@@ -449,7 +457,7 @@ if train:
 		
 		y_pred = np.array(temp)
 
-		conf_mat = confusion_matrix(y_test, y_pred)
+		conf_mat = confusion_matrix(y_val, y_pred)
 
 		print('accuracy', acc)
 		print('matrix', conf_mat)

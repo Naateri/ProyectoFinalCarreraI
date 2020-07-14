@@ -1,101 +1,261 @@
-## TODO:
-## -word2vec
-## -KFold for MR dataset
-
 from KimCNN import KimCNN
 import numpy as np
+import os
+import tensorflow as tf
 from tensorflow.keras.datasets import imdb
 from tensorflow.keras.preprocessing import sequence
+from tensorflow.keras.preprocessing.text import Tokenizer
 from sklearn.model_selection import train_test_split
-import os
+from sklearn.metrics import confusion_matrix
 
+### Global Variables ###
 
-# Pass sentence to integers
-def transform(sentence, pad_len, words, /, ret_array=True, UNK=2,
-		max_features=40000):
+DATASET = 1
+# 0 -> keras IMDB
+# 1 -> MR
+# 2 -> SST2
+# 3 -> IMDB
+
+words = imdb.get_word_index()
+words = {k:(v+3) for k,v in words.items()}
+words["<PAD>"] = 0
+words["<START>"] = 1
+words["<UNK>"] = 2
+words["<UNUSED>"] = 3
+
+id_to_word = {value:key for key,value in words.items()}
+
+get_sentence = lambda vector : ' '.join(id_to_word[num] for num in vector)
+
+maxlen = 400
+max_features = 20000
+
+def transform(sentence, pad_len, words=words):
 	vector = list()
 	sentence = sentence.split()
 	for word in sentence:
-		if word.lower() not in words:
-			vector.append(UNK)
-		else:
-			if words[word.lower()] >= max_features:
-				vector.append(UNK)
-			else:
+		try:
+			vector.append(words[word.lower()])
+		except:
+			vector.append(2)
+		'''
+		if word.lower() in words:
+			if words[word.lower()] < max_features:
 				vector.append(words[word.lower()])
+			else:
+				vector.append(2)
+		else:
+			vector.append(2)'''
 	# Saving as numpy array
 	vector = np.array(vector) 
 	# Saving as a matrix
 	vector = np.array([vector])
 	# Padding
 	padded_vector = sequence.pad_sequences(vector, maxlen=pad_len)
-	if ret_array:
-		return padded_vector
-	else:
-		return padded_vector[0]
+	return padded_vector
 
-def get_wordvec_imdb():
-	vocab_file = 'datasets/aclimdb/imdb.vocab'
+### DATASETS ###
 
-	vf = open(vocab_file, 'r') # vf = vocab_file
-	# Create dictionary with words and its index
-	words = dict()
-	index = 0
-
-	for word in vf:
-		words[word.lower()] = index
-		index += 1
-
-	vf.close()
-
-	return words, index
-
-def load_MR(words, index):
-	pos_files = 'datasets/review_polarity/txt_sentoken/pos'
-	neg_files = 'datasets/review_polarity/txt_sentoken/neg'
+def load_MR(pad_len=40):
+	pos_files = 'datasets/MR/rt-polarity.pos'
+	neg_files = 'datasets/MR/rt-polarity.neg'
 	
 	train_x = list()
 	train_y = list()
-	#words, index = get_wordvec_imdb() # For now
+	texts = list()
 
 	# train positives
 	print("MR positives")
-	for filename in os.listdir(pos_files):
-		#print(os.path.join(train_pos_files, filename))
-		# open in read_only mode
-		f = open(os.path.join(pos_files, filename), 'r')
-		#print(f.read())
-		array = transform(f.read(), 400, words, UNK=index, ret_array=False)
-		train_x.append(array)
-		train_y.append(1.0)
-		f.close()
 
+	f = open(pos_files, 'rb')
+	i = 0
+
+	for line in f:
+		try:
+			cur_line = line.decode('ascii').replace('\n', '')
+		except:
+			#print('error at', i)
+			#cur_line = line.decode('ascii', 'replace').replace('\n', '')
+			#print(cur_line)
+			#i += 1
+			continue
+		text_converted = transform(cur_line, pad_len)
+		#train_x.append(text_converted[0])
+		texts.append(cur_line)
+		train_y.append(1.0)
+		i += 1
+	
+	f.close()
+	
 	print("MR negatives")
-	for filename in os.listdir(neg_files):
-		#print(os.path.join(train_pos_files, filename))
-		# open in read_only mode
-		f = open(os.path.join(neg_files, filename), 'r')
-		#print(f.read())
-		array = transform(f.read(), 400, words, UNK=index, ret_array=False)
-		train_x.append(array)
-		train_y.append(1.0)
-		f.close()
+	
+	f = open(neg_files, 'rb')
+	i = 0
 
-	return train_x, train_y
+	for line in f:
+		try:
+			cur_line = line.decode('ascii').replace('\n', '')
+		except:
+			#print('error at', i)
+			#cur_line = line.decode('ascii', 'replace').replace('\n', '')
+			#print(cur_line)
+			#i += 1
+			continue
+		text_converted = transform(cur_line, pad_len)
+		#train_x.append(text_converted[0])
+		texts.append(cur_line)
+		train_y.append(0.0)
+		i += 1
 
+	# Creating dictionary
+	#tokenizer = Tokenizer(num_words=max_features)
+	tokenizer = Tokenizer()
+	tokenizer.fit_on_texts(texts)
+	sequences = tokenizer.texts_to_sequences(texts)
 
-def load_imdb(words, index):
+	word_index = tokenizer.word_index
+	train_x = sequence.pad_sequences(sequences, maxlen=maxlen)
+
+	return train_x, train_y, word_index
+
+def load_SST2(pad_len=45):
+	alltexts = 'datasets/SST2/unsup.csv'
+	trainfile = 'datasets/SST2/train.csv'
+	testfile = 'datasets/SST2/test.csv'
+	valfile = 'datasets/SST2/val.csv'
+
+	temp_train_x = list()
+	train_y = list()
+	temp_test_x = list()
+	test_y = list()
+
+	texts = list()
+
+	## Build tokenizer
+
+	print('Creating SST2 word index')
+
+	f = open(alltexts, 'r')
+
+	for line in f:
+		cur_data = line.split(',')
+
+		# Ignore first line
+		if cur_data[0] == 'label':
+			continue
+
+		text = cur_data[1].strip('\"\n')
+		texts.append(text)
+
+	f.close()
+
+	tokenizer = Tokenizer()
+	tokenizer.fit_on_texts(texts)
+
+	word_index = tokenizer.word_index
+	
+	## train and validation = train data
+
+	print('SST2 train data')
+
+	f = open(trainfile, 'r')
+
+	for line in f:
+		cur_data = line.split(',')
+
+		if cur_data[0] == 'label':
+			continue
+
+		text = cur_data[1].strip('\"\n')
+		#print(text)
+		temp_train_x.append(text)
+		
+		train_y.append(float(cur_data[0]))
+	
+	f.close()
+
+	## Test
+	print('SST2 val data')
+	f = open(valfile, 'r')
+
+	for line in f:
+		cur_data = line.split(',')
+
+		if cur_data[0] == 'label':
+			continue
+
+		text = cur_data[1].strip('\"\n')
+		#print(text)
+		temp_test_x.append(text)
+		
+		test_y.append(float(cur_data[0]))
+
+	f.close()
+	
+	sequences = tokenizer.texts_to_sequences(temp_train_x)
+	train_x = sequence.pad_sequences(sequences, maxlen=maxlen)
+
+	test_seq = tokenizer.texts_to_sequences(temp_test_x)
+	test_x = sequence.pad_sequences(test_seq, maxlen=maxlen)
+
+	return (train_x, train_y), (test_x, test_y), word_index
+
+def load_SST2test(word_index):
+	testfile = 'datasets/SST2/test.csv'
+
+	f = open(testfile, 'r')
+	x = list()
+	y = list()
+
+	for line in f:
+		cur_data = line.split(',')
+
+		if cur_data[0] == 'label':
+			continue
+
+		text = cur_data[1].strip('\"\n')
+
+		array = transform(text, 45, word_index)
+		#print(text)
+		x.append(array[0])
+		y.append(float(cur_data[0]))
+
+	f.close()
+
+	return x, y
+
+def load_imdb():
 	train_pos_files = 'datasets/aclimdb/train/pos'
 	train_neg_files = 'datasets/aclimdb/train/neg'
 	test_pos_files = 'datasets/aclimdb/test/pos'
 	test_neg_files = 'datasets/aclimdb/test/neg'
+	all_files = 'datasets/aclimdb/train/unsup'
 	
-	train_x = list()
+	temp_train_x = list()
 	train_y = list()
-	test_x = list()
+	temp_test_x = list()
 	test_y = list()
 
-	#words, index = get_wordvec_imdb()
+	texts = list()
+
+	## Build tokenizer
+
+	print('Creating IMDB word index')
+
+	for filename in os.listdir(all_files):
+		#print(os.path.join(train_pos_files, filename))
+		# open in read_only mode
+		f = open(os.path.join(all_files, filename), 'r')
+		
+		text = f.read()
+		text = text.replace('<br /><br />', '')
+		texts.append(text)
+		f.close()
+
+	tokenizer = Tokenizer()
+	tokenizer.fit_on_texts(texts)
+
+	word_index = tokenizer.word_index
 	
 	# train positives
 	print("IMDB train positives")
@@ -103,9 +263,11 @@ def load_imdb(words, index):
 		#print(os.path.join(train_pos_files, filename))
 		# open in read_only mode
 		f = open(os.path.join(train_pos_files, filename), 'r')
+		#f = open(train_pos_files+"/"+filename, 'r')
 		#print(f.read())
-		array = transform(f.read(), 400, words, UNK=index, ret_array=False)
-		train_x.append(array)
+		text = f.read()
+		text = text.replace('<br /><br />', '')
+		temp_train_x.append(text)
 		train_y.append(1.0)
 		f.close()
 
@@ -116,8 +278,9 @@ def load_imdb(words, index):
 		# open in read_only mode
 		f = open(os.path.join(train_neg_files, filename), 'r')
 		#print(f.read())
-		array = transform(f.read(), 400, words, UNK=index, ret_array=False)
-		train_x.append(array)
+		text = f.read()
+		text = text.replace('<br /><br />', '')
+		temp_train_x.append(text)
 		train_y.append(0.0)
 		f.close()
 
@@ -128,8 +291,9 @@ def load_imdb(words, index):
 		# open in read_only mode
 		f = open(os.path.join(test_pos_files, filename), 'r')
 		#print(f.read())
-		array = transform(f.read(), 400, words, UNK=index, ret_array=False)
-		test_x.append(array)
+		text = f.read()
+		text = text.replace('<br /><br />', '')
+		temp_test_x.append(text)
 		test_y.append(1.0)
 		f.close()
 	
@@ -140,143 +304,81 @@ def load_imdb(words, index):
 		# open in read_only mode
 		f = open(os.path.join(test_neg_files, filename), 'r')
 		#print(f.read())
-		array = transform(f.read(), 400, words, UNK=index, ret_array=False)
-		test_x.append(array)
+		text = f.read()
+		text = text.replace('<br /><br />', '')
+		temp_test_x.append(text)
 		test_y.append(0.0)
 		f.close()
-	
-	return (train_x, train_y), (test_x, test_y)
 
-def load_sst2(words, index):
-	textfile = 'datasets/SST2/unsup.csv'
-	trainfile = 'datasets/SST2/train.csv'
-	testfile = 'datasets/SST2/test.csv'
+	sequences = tokenizer.texts_to_sequences(temp_train_x)
+	train_x = sequence.pad_sequences(sequences, maxlen=maxlen)
 
-	train_x = list()
-	train_y = list()
-	test_x = list()
-	test_y = list()
+	test_seq = tokenizer.texts_to_sequences(temp_test_x)
+	test_x = sequence.pad_sequences(test_seq, maxlen=maxlen)
 
-	#words, index = get_wordvec_imdb()
-	'''
-	f = open(textfile, 'r')
-	
-	while True:
-		line = f.readline()
-
-		if not line:
-			break
-			
-		cur_data = line.split(',')
-
-		if cur_data[0] == 'label':
-			continue
-
-		text = cur_data[1].strip('\"\n')
-		#print(text)
-		array = transform(text, 400, words, UNK=index, ret_array=False)
-		train_x.append(array)
-		
-		train_y.append(float(cur_data[0]))
-	'''
-
-	## Train
-
-	f = open(trainfile, 'r')
-	
-	while True:
-		line = f.readline()
-
-		if not line:
-			break
-			
-		cur_data = line.split(',')
-
-		if cur_data[0] == 'label':
-			continue
-
-		text = cur_data[1].strip('\"\n')
-		#print(text)
-		array = transform(text, 400, words, UNK=index, ret_array=False)
-		train_x.append(array)
-		
-		train_y.append(float(cur_data[0]))
-	
-	f.close()
-
-	## Test
-	f = open(testfile, 'r')
-	
-	while True:
-		line = f.readline()
-
-		if not line:
-			break
-			
-		cur_data = line.split(',')
-
-		if cur_data[0] == 'label':
-			continue
-
-		text = cur_data[1].strip('\"\n')
-		#print(text)
-		array = transform(text, 400, words, UNK=index, ret_array=False)
-		test_x.append(array)
-		
-		test_y.append(float(cur_data[0]))
-
-	return (train_x, train_y), (test_x, test_y)
-	
+	return (train_x, train_y), (test_x, test_y), word_index
 
 train = True # True if training neural network, False if testing
 
-maxlen = 400
-max_features = 40000
-
-imdb_words = imdb.get_word_index()
-imdb_words = {k:(v+3) for k,v in imdb_words.items()}
-imdb_words["<PAD>"] = 0
-imdb_words["<START>"] = 1
-imdb_words["<UNK>"] = 2
-imdb_words["<UNUSED>"] = 3
-
-words, imdb_index = get_wordvec_imdb()
-
-id_to_word = {value:key for key,value in words.items()}
-
-get_sentence = lambda vector : ' '.join(id_to_word[num] for num in vector)
-
-#print(get_sentence(x_train[0]), y_train[0])
-#print(get_sentence(x_train[1]), y_train[1])
-
-#load_imdb()
-#exit()
-
 DATASET = 3
 
-# 0 -> keras imdb
-# 1 -> IMDB
-# 2 -> MR 
-# 3 -> SST2
+if DATASET == 0:
+	#network = HameedBiLSTM(400, max_features, use_glove=True, word_index=words)
+	maxlen = 400
+elif DATASET == 1: # MR
+	#max_features = len(words)
+	maxlen = 40
+elif DATASET == 2:
+	maxlen = 45
+elif DATASET == 3:
+	maxlen = 400
+
+# 0 -> keras IMDB
+# 1 -> MR
+# 2 -> SST2
+# 3 -> IMDB
 
 if train:
 	print('Training model')
 	print('Loading data...')
-	if DATASET == 0:
+	if DATASET == 0: # Keras IMDB
 		data = imdb.load_data(num_words=max_features)
 		(x_train, y_train), (x_test, y_test) = data
-	elif DATASET == 1:
-		#data = load_imdb(words, imdb_index)
-		data = load_imdb(imdb_words, 2)
-		(x_train, y_train), (x_test, y_test) = data
-	elif DATASET == 2:
-		print("len(i_words)", len(imdb_words))
-		data = load_MR(imdb_words, 2)
-		X, y = data
-		x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-	elif DATASET == 3:
-		data = load_sst2(imdb_words, 2)
-		(x_train, y_train), (x_test, y_test) = data
+		network = KimCNN(400, max_features)
+	elif DATASET == 1: # MR
+		X, y, mr_wordindex = load_MR()
+		print('Total data: ', len(X))
+		X_train, x_val, Y_train, y_val = train_test_split(X, y, test_size=0.1)
+
+		#x_val = sequence.pad_sequences(x_val, maxlen=maxlen)
+
+		x_train, x_test, y_train, y_test = train_test_split(X_train, Y_train, test_size=0.1)
+
+		max_features = len(mr_wordindex)+1
+
+		network = KimCNN(40, max_features, use_glove=False, word_index=mr_wordindex)
+
+	elif DATASET == 2: # SST2
+		(x_train, y_train), (x_test, y_test), sst2_wordindex = load_SST2()
+		print('Total data: ', len(x_train) + len(x_test))
+
+		max_features = len(sst2_wordindex) + 1
+
+		network = KimCNN(45, max_features, use_glove=False, word_index=sst2_wordindex)
+	
+	elif DATASET == 3: # IMDB
+		(X, y), (x_val, y_val), imdb_wordindex = load_imdb()
+		print('Total data: ', len(X) + len(x_val))
+		# val will be used to test the models accuracy
+		# based on the split made by the dataset
+
+		x_val = sequence.pad_sequences(x_val, maxlen=maxlen)
+
+		x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.1)
+
+		max_features = len(imdb_wordindex) + 1
+
+		network = KimCNN(400, max_features, use_glove=False, word_index=imdb_wordindex)
 
 	# x_train, x_test = list of indexes (words)
 	# y_train, y_test = list of 0 (neg) or 1 (pos)
@@ -285,9 +387,9 @@ if train:
 	print(len(x_test), 'test sequences')
 
 	print('Pad sequences (samples x time)')
-	if DATASET == 0:
-		x_train = sequence.pad_sequences(x_train, maxlen=maxlen)
-		x_test = sequence.pad_sequences(x_test, maxlen=maxlen)
+	#if DATASET == 0:
+	x_train = sequence.pad_sequences(x_train, maxlen=maxlen)
+	x_test = sequence.pad_sequences(x_test, maxlen=maxlen)
 	
 	x_train = np.array(x_train)
 	x_test = np.array(x_test)
@@ -297,40 +399,38 @@ if train:
 	y_test = np.array(y_test)
 
 	print("x shape: ", x_train[0].shape)
-	print("x_train[0]", x_train[0])
-	print("x_train[1]", x_train[1])
-	example = transform("That guy sucks really bad buddy", maxlen, imdb_words)
+	#print("x_train[0]", x_train[0])
+	#print("x_train[1]", x_train[1])
+	if DATASET == 0:
+		example = transform("That guy sucks really bad buddy", maxlen)
+	elif DATASET == 1:
+		example = transform("That guy sucks really bad buddy", maxlen, mr_wordindex)
+	elif DATASET == 2:
+		example = transform("That guy sucks really bad buddy", maxlen, sst2_wordindex)
+	elif DATASET == 3:
+		example = transform("That guy sucks really bad buddy", maxlen, imdb_wordindex)
+	
 	print("example shape", example.shape)
 	#print("example in array shape", np.array([example]).shape)
-
-	batch_size = 50
-	if DATASET == 0 or DATASET == 1:
-		network = KimCNN(400, max_features)
-		#epochs = 45
-		epochs = 1
-	elif DATASET == 2:
-		network = KimCNN(400, max_features)
-		batch_size = 20
-		#epochs = 60
-		epochs = 1
-	elif DATASET == 3:
-		network = KimCNN(400, max_features)
-		epochs = 10
 
 	print("Ready to train")
 	#exit()
 	if DATASET == 0:
-		network.train(x_train, x_test, y_train, y_test, batch_size=batch_size, epochs=epochs,
-			save_model=True, save_file='models/kimcnn_model')
-	elif DATASET == 1:
-		network.train(x_train, x_test, y_train, y_test, batch_size=batch_size, epochs=epochs,
-			save_model=True, save_file='models/kimcnn_model_imdb')
-	elif DATASET == 2:
-		network.train(x_train, x_test, y_train, y_test, batch_size=batch_size, epochs=epochs,
-			save_model=True, save_file='models/kimcnn_model_MR')
-	elif DATASET == 3:
-		network.train(x_train, x_test, y_train, y_test, batch_size=batch_size, epochs=epochs,
-			save_model=True, save_file='models/kimcnn_model_SST2')
+		network.train(x_train, x_test, y_train, y_test, batch_size=64, epochs=45,
+			save_model=False, save_file='models/kimcnn_model_glove')
+	elif DATASET == 1: # MR
+		epochs = 25
+		network.train(x_train, x_test, y_train, y_test, batch_size=50, epochs=epochs,
+			save_model=True, save_file='models/kimcnn_model_MR_NOGlove25e_1D_NoReg')
+	elif DATASET == 2: # SST2
+		epochs = 25
+		network.train(x_train, x_test, y_train, y_test, batch_size=50, epochs=epochs,
+			save_model=False, save_file='models/kimcnn_model_SST2_glove25e_1D_NoReg')
+	elif DATASET == 3: # IMDB
+		epochs = 15
+		network.train(x_train, x_test, y_train, y_test, batch_size=50, epochs=epochs,
+			save_model=True, save_file='models/kimcnn_model_IMDB_NOglove15e_1D_NoReg')
+
 
 	model = network.model
 
@@ -340,9 +440,86 @@ if train:
 	print(predictions)
 
 	print("Value to predict:", "He is an amazing driver loved it")
-	example = transform("He is an amazing driver loved it", maxlen, imdb_words)
+	if DATASET == 0:
+		example = transform("He is an amazing driver loved it", maxlen)
+	elif DATASET == 1:
+		example = transform("He is an amazing driver loved it", maxlen, mr_wordindex)
+	elif DATASET == 2:
+		example = transform("He is an amazing driver loved it", maxlen, sst2_wordindex)
+	elif DATASET == 3:
+		example = transform("He is an amazing driver loved it", maxlen, imdb_wordindex)
 	predictions = model.predict(np.array(example))
 	print(predictions)
+
+	if DATASET == 0:
+		pass
+	elif DATASET == 1: # MR 
+		x_val = np.array(x_val)
+		y_val = np.array(y_val)
+		y_pred = model.predict(x_val)
+		score, acc = model.evaluate(x_val, y_val, batch_size=50, verbose=0)
+
+		temp = list()
+		for value in y_pred:
+			if value <= 0.5:
+				temp.append(0.0)
+			else:
+				temp.append(1.0)
+		
+		y_pred = np.array(temp)
+
+		conf_mat = confusion_matrix(y_val, y_pred)
+
+		print('accuracy', acc)
+		print('matrix', conf_mat)
+	elif DATASET == 2: # SST2
+
+		## val = test set
+		print('SST2 data test')
+
+		x_val, y_val = load_SST2test(sst2_wordindex)
+		x_val = np.array(x_val)
+		y_val = np.array(y_val)
+		y_pred = model.predict(x_val)
+		#acc = tf.keras.metrics.binary_accuracy(y_val, y_pred, threshold=0.5)
+
+		score, acc = model.evaluate(x_val, y_val, batch_size=50, verbose=0)
+
+		temp = list()
+		for value in y_pred:
+			if value <= 0.5:
+				temp.append(0.0)
+			else:
+				temp.append(1.0)
+		
+		y_pred = np.array(temp)
+
+		conf_mat = confusion_matrix(y_val, y_pred)
+
+		print('accuracy', acc)
+		print('matrix', conf_mat)
+	
+	elif DATASET == 3: # IMDB
+		x_val = np.array(x_val)
+		y_val = np.array(y_val)
+		y_pred = model.predict(x_val)
+		#acc = tf.keras.metrics.binary_accuracy(y_val, y_pred, threshold=0.5)
+
+		score, acc = model.evaluate(x_val, y_val, batch_size=50, verbose=0)
+
+		temp = list()
+		for value in y_pred:
+			if value <= 0.5:
+				temp.append(0.0)
+			else:
+				temp.append(1.0)
+		
+		y_pred = np.array(temp)
+
+		conf_mat = confusion_matrix(y_val, y_pred)
+
+		print('accuracy', acc)
+		print('matrix', conf_mat)
 
 else:
 	model = network.load('models/kimcnn_model')
